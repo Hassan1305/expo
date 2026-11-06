@@ -12,17 +12,17 @@ This app does not cover React Server Components. Use `apps/router-e2e` for those
 
 ## Environment variables
 
-| Variable                                                                                       | Effect                                                                 |
-| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `E2E_ROUTER_WEB_OUTPUT`                                                                        | Web output mode: `server` (default), `static`, or `single`.            |
-| `E2E_ROUTER_ASYNC`                                                                             | Async routes: `true`, `false`, `development`, or `production`.         |
-| `E2E_ROUTER_SPLIT_STRATEGY`                                                                    | Set to `granular` to enable granular chunking.                         |
-| `E2E_ROUTER_API_ROUTES`                                                                        | Set to `true` or `false` to force the `apiRoutes` plugin option.       |
-| `E2E_ROUTER_SITEMAP`                                                                           | Set to `false` to disable the sitemap route.                           |
-| `E2E_ROUTER_REDIRECTS`, `E2E_ROUTER_REWRITES`, `E2E_ROUTER_HEADERS`, `E2E_ROUTER_PAGE_HEADERS` | JSON values for the matching `expo-router` plugin options.             |
-| `E2E_ROUTER_THROW_ON_LOAD`                                                                     | Set to `true` so `app/errors/throw-on-load.tsx` throws while it loads. |
-| `E2E_FAVICON`                                                                                  | Path to the `web.favicon` image, for example `./assets/icon.png`.      |
-| `EXPO_E2E_BASE_PATH`                                                                           | Sets `experiments.baseUrl`.                                            |
+| Variable                                                                                       | Effect                                                                                                                              |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `E2E_ROUTER_WEB_OUTPUT`                                                                        | Web output mode: `server` (default), `static`, or `single`.                                                                         |
+| `E2E_ROUTER_ASYNC`                                                                             | Async routes: `true`, `false`, `development`, or `production`.                                                                      |
+| `E2E_ROUTER_SPLIT_STRATEGY`                                                                    | Set to `granular` to enable granular chunking.                                                                                      |
+| `E2E_ROUTER_API_ROUTES`                                                                        | Set to `true` or `false` to force the `apiRoutes` plugin option.                                                                    |
+| `E2E_ROUTER_SITEMAP`                                                                           | Set to `false` to disable the sitemap route.                                                                                        |
+| `E2E_ROUTER_REDIRECTS`, `E2E_ROUTER_REWRITES`, `E2E_ROUTER_HEADERS`, `E2E_ROUTER_PAGE_HEADERS` | JSON values for the matching `expo-router` plugin options. `app.config.js` has default redirects and rewrites under `/middleware/`. |
+| `E2E_ROUTER_THROW_ON_LOAD`                                                                     | Set to `true` so `app/errors/throw-on-load.tsx` throws while it loads.                                                              |
+| `E2E_FAVICON`                                                                                  | Path to the `web.favicon` image, for example `./assets/icon.png`.                                                                   |
+| `EXPO_E2E_BASE_PATH`                                                                           | Sets `experiments.baseUrl`.                                                                                                         |
 
 ## Run
 
@@ -30,4 +30,4 @@ This app does not cover React Server Components. Use `apps/router-e2e` for those
 - Web, production: `pnpm export`, then `pnpm serve dist` or `pnpm serve:express`.
 - iOS: `pnpm prebuild`, then `pnpm ios`.
 - Android: `pnpm prebuild`, then `pnpm android`.
-- E2E tests: from `packages/@expo/cli`, run `pnpm test:e2e <test name>`.
+- E2E tests: from `packages/@expo/cli`, run `pnpm test:e2e <test name>`. The Jest global setup exports this app once into `dist` with the default options. A suite that passes `export` options to `prepareServers()` exports into its own `dist-<key>` directory instead.
