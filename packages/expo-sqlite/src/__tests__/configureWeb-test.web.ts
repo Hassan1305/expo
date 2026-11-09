@@ -45,6 +45,7 @@ const describeServer = typeof window === 'undefined' ? describe : describe.skip;
 
 describeWeb('Configuring web', () => {
   let SQLite: typeof SQLiteModule;
+  let markReady: (state: 'ready' | 'loading' | { error: string }) => void;
 
   beforeEach(() => {
     MockWorker.instances = [];
@@ -53,6 +54,7 @@ describeWeb('Configuring web', () => {
     delete (globalThis as any).expo?.modules?.SQLiteModule;
     jest.isolateModules(() => {
       SQLite = require('../index');
+      markReady = require('../../web/WorkerChannel').markSQLiteWebWorkerReady;
     });
   });
 
@@ -137,6 +139,21 @@ describeWeb('Configuring web', () => {
       type: 'configure',
       data: { wasmURL: '/late.wasm' },
     });
+  });
+
+  it('should retry a failed wasm load on the next sync call', async () => {
+    await nextTurnAsync();
+    const first = MockWorker.instances[0]!;
+    markReady({ error: 'wasm failed' });
+    expect(() => SQLite.openDatabaseSync('app.db')).toThrow(/has not finished loading/);
+    expect(() => SQLite.openDatabaseSync('app.db')).toThrow(/has not finished loading/);
+    expect(first.postMessage.mock.calls.map((call) => call[0].type)).toEqual([
+      'configure',
+      'init',
+      'init',
+    ]);
+    SQLite.configureWeb({ wasmURL: '/retry.wasm' });
+    expect(first.postMessage.mock.calls.map((call) => call[0].type)).toContain('shutdown');
   });
 
   it('should allow a wasm url change after a sync call before the worker is ready', async () => {

@@ -14,6 +14,7 @@ import {
 import { type SQLiteWebOptions } from '../src/WebConfiguration';
 import {
   assertSyncWorkerCanPost,
+  beginSyncWorkerLoadRetry,
   invokeWorkerAsync,
   invokeWorkerSync,
   markSQLiteWebWorkerReady,
@@ -96,6 +97,17 @@ function createWorker(): Worker {
 function getWorker(): Worker {
   // The old worker still owns the database files until it posts workerShutdown.
   if (workerShutdown != null) {
+    throw new Error(SYNC_WORKER_NOT_READY_MESSAGE);
+  }
+  // The wasm load already failed. Post init again and return.
+  // The worker can fetch wasm only while this call is not spinning.
+  if (beginSyncWorkerLoadRetry()) {
+    const current = worker;
+    if (current == null) {
+      createWorker();
+    } else {
+      current.postMessage({ type: 'init' } satisfies InitWorkerMessage);
+    }
     throw new Error(SYNC_WORKER_NOT_READY_MESSAGE);
   }
   // This call throws before it posts, so it has not opened a database.

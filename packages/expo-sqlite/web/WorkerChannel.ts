@@ -39,6 +39,18 @@ export function markSQLiteWebWorkerReady(state: 'ready' | 'loading' | { error: s
 }
 
 /**
+ * Clears a finished wasm load error so the caller can post `init` again.
+ * Returns false while a load is still in progress or after it has succeeded.
+ */
+export function beginSyncWorkerLoadRetry(): boolean {
+  if (workerReady || workerInitError == null) {
+    return false;
+  }
+  workerInitError = null;
+  return true;
+}
+
+/**
  * Throws when a synchronous call must return before it posts to the worker.
  */
 export function assertSyncWorkerCanPost(): void {
