@@ -7,15 +7,7 @@ jest.mock('expo/devtools', () => ({
 class MockWorker {
   static instances: MockWorker[] = [];
   private listeners = new Map<string, ((event: { data?: { type?: string } }) => void)[]>();
-  postMessage = jest.fn((message?: { type?: string }) => {
-    if (message?.type !== 'shutdown') {
-      return;
-    }
-    const handlers = [...(this.listeners.get('message') ?? [])];
-    for (const handler of handlers) {
-      handler({ data: { type: 'workerShutdown' } });
-    }
-  }) as jest.Mock;
+  postMessage = jest.fn() as jest.Mock;
   addEventListener = jest.fn(
     (type: string, handler: (event: { data?: { type?: string } }) => void) => {
       const list = this.listeners.get(type) ?? [];
@@ -35,6 +27,13 @@ class MockWorker {
   terminate = jest.fn();
   constructor() {
     MockWorker.instances.push(this);
+  }
+
+  ackShutdown(): void {
+    const handlers = [...(this.listeners.get('message') ?? [])];
+    for (const handler of handlers) {
+      handler({ data: { type: 'workerShutdown' } });
+    }
   }
 }
 
@@ -106,6 +105,9 @@ describeWeb('Configuring web', () => {
     const first = MockWorker.instances[0]!;
     SQLite.configureWeb({ wasmURL: '/sqlite/wa-sqlite-fts.wasm' });
     expect(first.postMessage.mock.calls.map((call) => call[0].type)).toContain('shutdown');
+    expect(first.terminate).not.toHaveBeenCalled();
+    expect(MockWorker.instances).toHaveLength(1);
+    first.ackShutdown();
     expect(first.terminate).toHaveBeenCalledTimes(1);
     await nextTurnAsync();
     expect(MockWorker.instances).toHaveLength(2);
@@ -114,6 +116,30 @@ describeWeb('Configuring web', () => {
       data: { wasmURL: '/sqlite/wa-sqlite-fts.wasm' },
     });
     expect(MockWorker.instances[1]!.postMessage.mock.calls[1][0].type).toBe('init');
+  });
+
+  it('should throw a sync call while the old worker is shutting down', async () => {
+    await nextTurnAsync();
+    const first = MockWorker.instances[0]!;
+    SQLite.configureWeb({ wasmURL: '/sqlite/wa-sqlite-fts.wasm' });
+    expect(() => SQLite.openDatabaseSync('app.db')).toThrow(/has not finished loading/);
+    expect(MockWorker.instances).toHaveLength(1);
+    first.ackShutdown();
+  });
+
+  it('should wait to open until the old worker shuts down', async () => {
+    await nextTurnAsync();
+    const first = MockWorker.instances[0]!;
+    SQLite.configureWeb({ wasmURL: '/sqlite/wa-sqlite-fts.wasm' });
+    const opening = SQLite.openDatabaseAsync('app.db');
+    await Promise.resolve();
+    expect(MockWorker.instances).toHaveLength(1);
+    first.ackShutdown();
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(2);
+    const messages = MockWorker.instances[1]!.postMessage.mock.calls.map((call) => call[0].type);
+    expect(messages).toEqual(['configure', 'init', 'open']);
+    void opening;
   });
 
   it('should configure the worker with no options by default', async () => {
