@@ -256,6 +256,10 @@ export interface ConfigureWorkerMessage {
   data: SQLiteWebOptions;
 }
 
+export interface InitWorkerMessage {
+  type: 'init';
+}
+
 //#endregion Request messages
 
 //#region Response messages

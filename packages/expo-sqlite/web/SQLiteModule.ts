@@ -12,8 +12,13 @@ import {
   type SQLiteRunResult,
 } from '../src/NativeStatement';
 import { type SQLiteWebOptions } from '../src/WebConfiguration';
-import { invokeWorkerAsync, invokeWorkerSync, workerMessageHandler } from './WorkerChannel';
-import { type ConfigureWorkerMessage } from './web.types';
+import {
+  invokeWorkerAsync,
+  invokeWorkerSync,
+  markSQLiteWebWorkerReady,
+  workerMessageHandler,
+} from './WorkerChannel';
+import { type ConfigureWorkerMessage, type InitWorkerMessage } from './web.types';
 
 let worker: Worker | null = null;
 let webOptions: SQLiteWebOptions = {};
@@ -25,6 +30,10 @@ function getWorker(): Worker {
   if (!worker) {
     worker = new Worker(new URL('./worker', window.location.href));
     worker.addEventListener('message', (event) => {
+      if (event.data?.type === 'workerReady') {
+        markSQLiteWebWorkerReady(event.data.error ? { error: event.data.error } : 'ready');
+        return;
+      }
       if (event.data.type === 'onDatabaseChange') {
         // @ts-expect-error EventEmitter type for NativeModule is not inferred correctly on web.
         SQLiteModuleInstance.emit(event.data.type, event.data.data);
@@ -33,6 +42,7 @@ function getWorker(): Worker {
       workerMessageHandler(event);
     });
     worker.postMessage({ type: 'configure', data: webOptions } satisfies ConfigureWorkerMessage);
+    worker.postMessage({ type: 'init' } satisfies InitWorkerMessage);
   }
   return worker;
 }

@@ -13,8 +13,30 @@ let messageId = 0;
 const deferredMap = new Map<number, Deferred>();
 const PENDING = 1;
 const RESOLVED = 2;
+/** How long a synchronous call may block the main thread after the worker has loaded. */
+const SYNC_OPERATION_TIMEOUT_MS = 15_000;
+/** Reading the clock on every busy-loop turn is several times slower. */
+const SYNC_CLOCK_CHECK_SPINS = 4096;
+const SYNC_WORKER_NOT_READY_MESSAGE =
+  'The SQLite web worker has not finished loading. A synchronous call blocks the main thread, so the worker cannot finish loading during this call. Await openDatabaseAsync() once before using the synchronous API.';
 
 let hasWarnedSync = false;
+let workerReady = false;
+let workerInitError: string | null = null;
+
+/**
+ * Records whether the web worker has finished loading SQLite.
+ * Pass `'ready'` after a successful load, `{ error }` when loading fails, or `'loading'` to clear that state.
+ */
+export function markSQLiteWebWorkerReady(state: 'ready' | 'loading' | { error: string }): void {
+  if (state === 'ready') {
+    workerReady = true;
+    workerInitError = null;
+    return;
+  }
+  workerReady = false;
+  workerInitError = state === 'loading' ? null : state.error;
+}
 
 /**
  * For worker to send result to the main thread.
@@ -101,6 +123,12 @@ export function invokeWorkerSync<T extends SQLiteWorkerMessageType & keyof Resul
   type: T,
   data: MessageTypeMap[T]['data']
 ): ResultTypeMap[T] {
+  // The worker finishes loading SQLite only while the main thread is free.
+  // Spinning before that load finishes blocks the load until this call gives up.
+  if (!workerReady) {
+    throw new Error(workerInitError ?? SYNC_WORKER_NOT_READY_MESSAGE);
+  }
+
   if (__DEV__ && !hasWarnedSync) {
     console.warn(
       'Using synchronous SQLite operations can cause significant performance impact. Consider using async operations instead.'
@@ -124,24 +152,20 @@ export function invokeWorkerSync<T extends SQLiteWorkerMessageType & keyof Resul
     resultBuffer,
   });
 
-  let i = 0;
+  // NOTE(kudo): Unfortunate for the busy loop,
+  // because we don't have a way for main thread to yield its execution to other callbacks.
+  let spins = 0;
+  const deadline = performance.now() + SYNC_OPERATION_TIMEOUT_MS;
   // @ts-expect-error: Remove this when TypeScript supports Atomics.pause
   const useAtomicsPause = typeof Atomics.pause === 'function';
   while (Atomics.load(lock, 0) === PENDING) {
-    ++i;
-
+    if (spins % SYNC_CLOCK_CHECK_SPINS === 0 && performance.now() >= deadline) {
+      throw new Error('Sync operation timeout');
+    }
+    spins += 1;
     if (useAtomicsPause) {
-      if (i > 1_000_000) {
-        throw new Error('Sync operation timeout');
-      }
       // @ts-expect-error: Remove this when TypeScript supports Atomics.pause
       Atomics.pause();
-    } else {
-      // NOTE(kudo): Unfortunate for the busy loop,
-      // because we don't have a way for main thread to yield its execution to other callbacks.
-      if (i > 1000_000_000) {
-        throw new Error('Sync operation timeout');
-      }
     }
   }
 

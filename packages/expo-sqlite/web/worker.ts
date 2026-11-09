@@ -23,6 +23,7 @@ import WaSQLiteFactory from './wa-sqlite/wa-sqlite';
 import wasmModule from './wa-sqlite/wa-sqlite.wasm';
 import {
   type ConfigureWorkerMessage,
+  type InitWorkerMessage,
   type SQLiteWorkerMessage,
   type SQLiteWorkerMessageType,
   type MessageTypeMap,
@@ -58,6 +59,11 @@ let _sqlite3: SQLiteAPI | null = null;
 let _vfs: AccessHandlePoolVFS | null = null;
 let _vfsMemory: MemoryVFS | null = null;
 let _webOptions: SQLiteWebOptions = {};
+let sqliteInitPromise: Promise<{
+  sqlite3: SQLiteAPI;
+  vfs: AccessHandlePoolVFS;
+  vfsMemory: MemoryVFS;
+}> | null = null;
 
 const databaseIdMap = new Map<number, DatabaseEntity>();
 const statementIdMap = new Map<number, StatementEntity>();
@@ -65,9 +71,21 @@ const sessionIdMap = new Map<number, SessionEntity>();
 
 class SQLiteErrorException extends Error {}
 
-self.onmessage = async (event: MessageEvent<SQLiteWorkerMessage | ConfigureWorkerMessage>) => {
+self.onmessage = async (
+  event: MessageEvent<SQLiteWorkerMessage | ConfigureWorkerMessage | InitWorkerMessage>
+) => {
   if (event.data.type === 'configure') {
     _webOptions = event.data.data;
+    return;
+  }
+  if (event.data.type === 'init') {
+    try {
+      await maybeInitAsync();
+      self.postMessage({ type: 'workerReady' });
+    } catch (e) {
+      const error = e instanceof Error ? e.message || String(e) : String(e);
+      self.postMessage({ type: 'workerReady', error });
+    }
     return;
   }
 
@@ -773,6 +791,22 @@ async function maybeFinalizeAllStatements(sqlite3: SQLiteAPI, dbEntity: Database
 }
 
 async function maybeInitAsync(): Promise<{
+  sqlite3: SQLiteAPI;
+  vfs: AccessHandlePoolVFS;
+  vfsMemory: MemoryVFS;
+}> {
+  // onmessage is async, so the init message and the first database call can overlap.
+  // Share one load. A failed load can be retried.
+  if (sqliteInitPromise == null) {
+    sqliteInitPromise = initializeSQLiteAsync().catch((error: unknown) => {
+      sqliteInitPromise = null;
+      throw error;
+    });
+  }
+  return sqliteInitPromise;
+}
+
+async function initializeSQLiteAsync(): Promise<{
   sqlite3: SQLiteAPI;
   vfs: AccessHandlePoolVFS;
   vfsMemory: MemoryVFS;
