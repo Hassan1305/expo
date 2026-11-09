@@ -6,8 +6,32 @@ jest.mock('expo/devtools', () => ({
 
 class MockWorker {
   static instances: MockWorker[] = [];
-  postMessage = jest.fn();
-  addEventListener = jest.fn();
+  private listeners = new Map<string, ((event: { data?: { type?: string } }) => void)[]>();
+  postMessage = jest.fn((message?: { type?: string }) => {
+    if (message?.type !== 'shutdown') {
+      return;
+    }
+    const handlers = [...(this.listeners.get('message') ?? [])];
+    for (const handler of handlers) {
+      handler({ data: { type: 'workerShutdown' } });
+    }
+  }) as jest.Mock;
+  addEventListener = jest.fn(
+    (type: string, handler: (event: { data?: { type?: string } }) => void) => {
+      const list = this.listeners.get(type) ?? [];
+      list.push(handler);
+      this.listeners.set(type, list);
+    }
+  );
+  removeEventListener = jest.fn(
+    (type: string, handler: (event: { data?: { type?: string } }) => void) => {
+      const list = this.listeners.get(type) ?? [];
+      this.listeners.set(
+        type,
+        list.filter((item) => item !== handler)
+      );
+    }
+  );
   terminate = jest.fn();
   constructor() {
     MockWorker.instances.push(this);
@@ -76,13 +100,15 @@ describeWeb('Configuring web', () => {
     });
   });
 
-  it('should load a new wasm url when it changes before a database is opened', async () => {
+  it('should close the preloaded worker before loading a new wasm url', async () => {
     await nextTurnAsync();
     expect(MockWorker.instances).toHaveLength(1);
+    const first = MockWorker.instances[0]!;
     SQLite.configureWeb({ wasmURL: '/sqlite/wa-sqlite-fts.wasm' });
+    expect(first.postMessage.mock.calls.map((call) => call[0].type)).toContain('shutdown');
+    expect(first.terminate).toHaveBeenCalledTimes(1);
     await nextTurnAsync();
     expect(MockWorker.instances).toHaveLength(2);
-    expect(MockWorker.instances[0]!.terminate).toHaveBeenCalledTimes(1);
     expect(MockWorker.instances[1]!.postMessage.mock.calls[0][0]).toEqual({
       type: 'configure',
       data: { wasmURL: '/sqlite/wa-sqlite-fts.wasm' },

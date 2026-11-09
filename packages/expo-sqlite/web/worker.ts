@@ -24,6 +24,7 @@ import wasmModule from './wa-sqlite/wa-sqlite.wasm';
 import {
   type ConfigureWorkerMessage,
   type InitWorkerMessage,
+  type ShutdownWorkerMessage,
   type SQLiteWorkerMessage,
   type SQLiteWorkerMessageType,
   type MessageTypeMap,
@@ -72,10 +73,26 @@ const sessionIdMap = new Map<number, SessionEntity>();
 class SQLiteErrorException extends Error {}
 
 self.onmessage = async (
-  event: MessageEvent<SQLiteWorkerMessage | ConfigureWorkerMessage | InitWorkerMessage>
+  event: MessageEvent<
+    SQLiteWorkerMessage | ConfigureWorkerMessage | InitWorkerMessage | ShutdownWorkerMessage
+  >
 ) => {
   if (event.data.type === 'configure') {
     _webOptions = event.data.data;
+    return;
+  }
+  if (event.data.type === 'shutdown') {
+    try {
+      await sqliteInitPromise?.catch(() => undefined);
+      await _vfs?.close();
+      _vfsMemory?.close();
+    } finally {
+      _sqlite3 = null;
+      _vfs = null;
+      _vfsMemory = null;
+      sqliteInitPromise = null;
+      self.postMessage({ type: 'workerShutdown' });
+    }
     return;
   }
   if (event.data.type === 'init') {
@@ -804,8 +821,19 @@ async function maybeInitAsync(): Promise<{
         return result;
       },
       (error: unknown) => {
+        // A failed setup leaves _sqlite3 set, and the next attempt then throws Invalid VFS state.
+        const vfs = _vfs;
+        const vfsMemory = _vfsMemory;
         sqliteInitPromise = null;
-        throw error;
+        _sqlite3 = null;
+        _vfs = null;
+        _vfsMemory = null;
+        return Promise.resolve(vfs?.close())
+          .catch(() => undefined)
+          .then(() => {
+            vfsMemory?.close();
+            throw error;
+          });
       }
     );
   }

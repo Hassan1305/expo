@@ -260,6 +260,10 @@ export interface InitWorkerMessage {
   type: 'init';
 }
 
+export interface ShutdownWorkerMessage {
+  type: 'shutdown';
+}
+
 //#endregion Request messages
 
 //#region Response messages

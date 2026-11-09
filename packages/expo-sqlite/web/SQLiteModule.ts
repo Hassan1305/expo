@@ -18,7 +18,11 @@ import {
   markSQLiteWebWorkerReady,
   workerMessageHandler,
 } from './WorkerChannel';
-import { type ConfigureWorkerMessage, type InitWorkerMessage } from './web.types';
+import {
+  type ConfigureWorkerMessage,
+  type InitWorkerMessage,
+  type ShutdownWorkerMessage,
+} from './web.types';
 
 let worker: Worker | null = null;
 let webOptions: SQLiteWebOptions = {};
@@ -92,10 +96,25 @@ function getWorker(): Worker {
 }
 
 function discardPreloadedWorker(): void {
+  const current = worker;
   workerEpoch += 1;
-  worker?.terminate();
   worker = null;
   markSQLiteWebWorkerReady('loading');
+  if (current == null) {
+    return;
+  }
+  // terminate() does not close OPFS sync access handles.
+  // Wait until the worker closes them before the replacement opens the same files.
+  const onMessage = (event: MessageEvent) => {
+    if (event.data?.type !== 'workerShutdown') {
+      return;
+    }
+    current.removeEventListener('message', onMessage);
+    current.terminate();
+    scheduleWorkerStart();
+  };
+  current.addEventListener('message', onMessage);
+  current.postMessage({ type: 'shutdown' } satisfies ShutdownWorkerMessage);
 }
 
 // web worker works on Uint8Array, but session methods accept ArrayBuffer too
@@ -507,7 +526,6 @@ export class SQLiteModule extends NativeModule {
     // The preloaded worker loaded the previous wasm URL. No database is open, so start again.
     if (worker != null) {
       discardPreloadedWorker();
-      scheduleWorkerStart();
     }
   }
 

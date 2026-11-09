@@ -53,7 +53,14 @@ export class AccessHandlePoolVFS extends FacadeVFS {
 
   static async create(name, module) {
     const vfs = new AccessHandlePoolVFS(name, module);
-    await vfs.isReady();
+    try {
+      await vfs.isReady();
+    } catch (error) {
+      // isReady() can open sync access handles and then throw.
+      // Close them so a later create() can take the files.
+      await vfs.close();
+      throw error;
+    }
     return vfs;
   }
 
