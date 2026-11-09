@@ -55,7 +55,8 @@ describeWeb('Configuring web', () => {
       type: 'configure',
       data: { wasmURL: '/sqlite/wa-sqlite-fts.wasm' },
     });
-    expect(worker.postMessage.mock.calls[1][0].type).toBe('open');
+    expect(worker.postMessage.mock.calls[1][0].type).toBe('init');
+    expect(worker.postMessage.mock.calls[2][0].type).toBe('open');
   });
 
   it('should use the options from the last call when called more than once', async () => {

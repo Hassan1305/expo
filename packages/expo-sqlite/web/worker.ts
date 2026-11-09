@@ -80,8 +80,8 @@ self.onmessage = async (
   }
   if (event.data.type === 'init') {
     try {
+      // A successful load posts workerReady from maybeInitAsync, including a later retry.
       await maybeInitAsync();
-      self.postMessage({ type: 'workerReady' });
     } catch (e) {
       const error = e instanceof Error ? e.message || String(e) : String(e);
       self.postMessage({ type: 'workerReady', error });
@@ -795,13 +795,19 @@ async function maybeInitAsync(): Promise<{
   vfs: AccessHandlePoolVFS;
   vfsMemory: MemoryVFS;
 }> {
-  // onmessage is async, so the init message and the first database call can overlap.
-  // Share one load. A failed load can be retried.
+  // onmessage is async, so init and the first database call can overlap. Share one load.
+  // Post workerReady here so a retry after a failed load clears the stored error.
   if (sqliteInitPromise == null) {
-    sqliteInitPromise = initializeSQLiteAsync().catch((error: unknown) => {
-      sqliteInitPromise = null;
-      throw error;
-    });
+    sqliteInitPromise = initializeSQLiteAsync().then(
+      (result) => {
+        self.postMessage({ type: 'workerReady' });
+        return result;
+      },
+      (error: unknown) => {
+        sqliteInitPromise = null;
+        throw error;
+      }
+    );
   }
   return sqliteInitPromise;
 }
