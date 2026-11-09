@@ -8,10 +8,13 @@ class MockWorker {
   static instances: MockWorker[] = [];
   postMessage = jest.fn();
   addEventListener = jest.fn();
+  terminate = jest.fn();
   constructor() {
     MockWorker.instances.push(this);
   }
 }
+
+const workerStartHandle = Symbol.for('expo-sqlite.webWorkerStart');
 
 // The Node project also runs `.web` tests to cover server rendering, where there is no worker.
 const describeWeb = typeof window !== 'undefined' ? describe : describe.skip;
@@ -31,8 +34,19 @@ describeWeb('Configuring web', () => {
   });
 
   afterEach(() => {
+    const globals = globalThis as typeof globalThis & {
+      [workerStartHandle]?: ReturnType<typeof setTimeout>;
+    };
+    if (globals[workerStartHandle] != null) {
+      clearTimeout(globals[workerStartHandle]);
+      delete globals[workerStartHandle];
+    }
     delete (globalThis as any).Worker;
   });
+
+  async function nextTurnAsync(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 
   async function startWorkerAsync(): Promise<MockWorker> {
     SQLite.openDatabaseAsync(':memory:').catch(() => {});
@@ -42,6 +56,39 @@ describeWeb('Configuring web', () => {
     expect(MockWorker.instances).toHaveLength(1);
     return MockWorker.instances[0]!;
   }
+
+  it('should start the worker on the next turn', async () => {
+    expect(MockWorker.instances).toHaveLength(0);
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    const started = MockWorker.instances[0]!;
+    expect(started.postMessage.mock.calls[0][0]).toEqual({ type: 'configure', data: {} });
+    expect(started.postMessage.mock.calls[1][0]).toEqual({ type: 'init' });
+  });
+
+  it('should use a wasm url configured before the worker starts', async () => {
+    SQLite.configureWeb({ wasmURL: '/sqlite/wa-sqlite-fts.wasm' });
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    expect(MockWorker.instances[0]!.postMessage.mock.calls[0][0]).toEqual({
+      type: 'configure',
+      data: { wasmURL: '/sqlite/wa-sqlite-fts.wasm' },
+    });
+  });
+
+  it('should load a new wasm url when it changes before a database is opened', async () => {
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    SQLite.configureWeb({ wasmURL: '/sqlite/wa-sqlite-fts.wasm' });
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(2);
+    expect(MockWorker.instances[0]!.terminate).toHaveBeenCalledTimes(1);
+    expect(MockWorker.instances[1]!.postMessage.mock.calls[0][0]).toEqual({
+      type: 'configure',
+      data: { wasmURL: '/sqlite/wa-sqlite-fts.wasm' },
+    });
+    expect(MockWorker.instances[1]!.postMessage.mock.calls[1][0].type).toBe('init');
+  });
 
   it('should configure the worker with no options by default', async () => {
     const worker = await startWorkerAsync();

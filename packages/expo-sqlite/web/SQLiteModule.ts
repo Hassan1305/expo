@@ -22,14 +22,53 @@ import { type ConfigureWorkerMessage, type InitWorkerMessage } from './web.types
 
 let worker: Worker | null = null;
 let webOptions: SQLiteWebOptions = {};
+let databaseOperationStarted = false;
+let workerEpoch = 0;
 let nextNativeDatabaseId = 0;
 let nextNativeStatementId = 0;
 let nextNativeSessionId = 0;
 
-function getWorker(): Worker {
+// A reloaded module, including a test, clears the previous schedule through this key.
+const workerStartHandle = Symbol.for('expo-sqlite.webWorkerStart');
+
+function cancelScheduledWorkerStart(): void {
+  const globals = globalThis as typeof globalThis & {
+    [workerStartHandle]?: ReturnType<typeof setTimeout>;
+  };
+  if (globals[workerStartHandle] != null) {
+    clearTimeout(globals[workerStartHandle]);
+    delete globals[workerStartHandle];
+  }
+}
+
+function scheduleWorkerStart(): void {
+  if (worker != null || typeof window === 'undefined') {
+    return;
+  }
+  const globals = globalThis as typeof globalThis & {
+    [workerStartHandle]?: ReturnType<typeof setTimeout>;
+  };
+  if (globals[workerStartHandle] != null) {
+    return;
+  }
+  // The next turn lets configureWeb() in this turn choose the wasm URL.
+  globals[workerStartHandle] = setTimeout(() => {
+    delete globals[workerStartHandle];
+    if (worker == null && typeof Worker === 'function') {
+      createWorker();
+    }
+  }, 0);
+}
+
+function createWorker(): Worker {
+  cancelScheduledWorkerStart();
   if (!worker) {
+    const epoch = ++workerEpoch;
     worker = new Worker(new URL('./worker', window.location.href));
     worker.addEventListener('message', (event) => {
+      if (epoch !== workerEpoch) {
+        return;
+      }
       if (event.data?.type === 'workerReady') {
         markSQLiteWebWorkerReady(event.data.error ? { error: event.data.error } : 'ready');
         return;
@@ -45,6 +84,18 @@ function getWorker(): Worker {
     worker.postMessage({ type: 'init' } satisfies InitWorkerMessage);
   }
   return worker;
+}
+
+function getWorker(): Worker {
+  databaseOperationStarted = true;
+  return createWorker();
+}
+
+function discardPreloadedWorker(): void {
+  workerEpoch += 1;
+  worker?.terminate();
+  worker = null;
+  markSQLiteWebWorkerReady('loading');
 }
 
 // web worker works on Uint8Array, but session methods accept ArrayBuffer too
@@ -442,15 +493,22 @@ export class SQLiteModule extends NativeModule {
   }
 
   configureWeb(options: SQLiteWebOptions): void {
-    if (worker != null) {
-      // Fast Refresh runs the same call again after a database is open.
-      if (options.wasmURL === webOptions.wasmURL) return;
+    // Fast Refresh runs the same call again after a database is open.
+    if (options.wasmURL === webOptions.wasmURL && (worker != null || databaseOperationStarted)) {
+      return;
+    }
+    if (databaseOperationStarted) {
       throw new Error(
         'Cannot change the SQLite WebAssembly URL because a database has already been opened, and the web worker loads SQLite only once. ' +
           'Call `configureWeb()` before opening any database, and reload the app after you change `wasmURL`.'
       );
     }
     webOptions = { ...options };
+    // The preloaded worker loaded the previous wasm URL. No database is open, so start again.
+    if (worker != null) {
+      discardPreloadedWorker();
+      scheduleWorkerStart();
+    }
   }
 
   async ensureDatabasePathExistsAsync(databasePath: string): Promise<void> {
@@ -505,4 +563,6 @@ export class SQLiteModule extends NativeModule {
 }
 
 const SQLiteModuleInstance = registerWebModule(SQLiteModule, 'SQLiteModule');
+cancelScheduledWorkerStart();
+scheduleWorkerStart();
 export default SQLiteModuleInstance;

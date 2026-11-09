@@ -620,8 +620,8 @@ export async function openDatabaseAsync(
  * Open a database.
  *
  * > **Note:** Running heavy tasks with this function can block the JavaScript thread and affect performance.
- * > On web, await [`openDatabaseAsync()`](#opendatabaseasync) once before this call.
- * > The worker loads SQLite while the main thread is free, and this call blocks the main thread.
+ * > On web, this package starts the SQLite worker on the next turn.
+ * > A call in the same turn as the import throws, because that call blocks the main thread before the worker has loaded.
  *
  * @param databaseName The name of the database file to open.
  * @param options Open options.

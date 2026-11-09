@@ -98,7 +98,7 @@ Add the following configuration to your **metro.config.js**. If you don't have t
 
 If you deploy your app to web hosting services, you will also need to add the `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` headers to your web server. [Learn more about the `COEP`, `COOP` headers, and `SharedArrayBuffer`](https://developer.chrome.com/blog/enabling-shared-array-buffer/).
 
-On web, await [`openDatabaseAsync()`](#opendatabaseasync) once before [`openDatabaseSync()`](#opendatabasesync) or any other synchronous call. The worker loads SQLite while the main thread is free. A synchronous call blocks the main thread, so the worker cannot finish loading during that call.
+On web, this package starts the SQLite worker on the next turn. The worker loads SQLite while the main thread is free. [`openDatabaseSync()`](#opendatabasesync) in the same turn as the import throws, because that call blocks the main thread before the worker has loaded.
 
 If you deploy your app on [Expo Hosting](/eas/hosting/introduction/), you can configure the headers in your app config:
 
