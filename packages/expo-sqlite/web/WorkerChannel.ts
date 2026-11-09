@@ -39,6 +39,15 @@ export function markSQLiteWebWorkerReady(state: 'ready' | 'loading' | { error: s
 }
 
 /**
+ * Throws when a synchronous call must return before it posts to the worker.
+ */
+export function assertSyncWorkerCanPost(): void {
+  if (!workerReady) {
+    throw new Error(workerInitError ?? SYNC_WORKER_NOT_READY_MESSAGE);
+  }
+}
+
+/**
  * For worker to send result to the main thread.
  */
 export function sendWorkerResult({
@@ -125,9 +134,7 @@ export function invokeWorkerSync<T extends SQLiteWorkerMessageType & keyof Resul
 ): ResultTypeMap[T] {
   // The worker finishes loading SQLite only while the main thread is free.
   // Spinning before that load finishes blocks the load until this call gives up.
-  if (!workerReady) {
-    throw new Error(workerInitError ?? SYNC_WORKER_NOT_READY_MESSAGE);
-  }
+  assertSyncWorkerCanPost();
 
   if (__DEV__ && !hasWarnedSync) {
     console.warn(

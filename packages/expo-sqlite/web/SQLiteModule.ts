@@ -13,6 +13,7 @@ import {
 } from '../src/NativeStatement';
 import { type SQLiteWebOptions } from '../src/WebConfiguration';
 import {
+  assertSyncWorkerCanPost,
   invokeWorkerAsync,
   invokeWorkerSync,
   markSQLiteWebWorkerReady,
@@ -97,6 +98,9 @@ function getWorker(): Worker {
   if (workerShutdown != null) {
     throw new Error(SYNC_WORKER_NOT_READY_MESSAGE);
   }
+  // This call throws before it posts, so it has not opened a database.
+  // configureWeb() can still replace the worker.
+  assertSyncWorkerCanPost();
   databaseOperationStarted = true;
   return createWorker();
 }
@@ -602,7 +606,13 @@ export class SQLiteModule extends NativeModule {
   readonly NativeSession: typeof NativeSession = NativeSession;
 }
 
-const SQLiteModuleInstance = registerWebModule(SQLiteModule, 'SQLiteModule');
-cancelScheduledWorkerStart();
-scheduleWorkerStart();
+const sqliteModuleName = 'SQLiteModule';
+// A second evaluation returns the instance that already owns the worker.
+// Scheduling again would start a worker that instance never uses.
+const moduleAlreadyRegistered = globalThis.expo?.modules?.[sqliteModuleName] != null;
+const SQLiteModuleInstance = registerWebModule(SQLiteModule, sqliteModuleName);
+if (!moduleAlreadyRegistered) {
+  cancelScheduledWorkerStart();
+  scheduleWorkerStart();
+}
 export default SQLiteModuleInstance;

@@ -127,6 +127,71 @@ describeWeb('Configuring web', () => {
     first.ackShutdown();
   });
 
+  it('should not start the worker when a sync call runs before the worker is ready', async () => {
+    expect(() => SQLite.openDatabaseSync('app.db')).toThrow(/has not finished loading/);
+    expect(MockWorker.instances).toHaveLength(0);
+    SQLite.configureWeb({ wasmURL: '/late.wasm' });
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    expect(MockWorker.instances[0]!.postMessage.mock.calls[0][0]).toEqual({
+      type: 'configure',
+      data: { wasmURL: '/late.wasm' },
+    });
+  });
+
+  it('should allow a wasm url change after a sync call before the worker is ready', async () => {
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    expect(() => SQLite.openDatabaseSync('app.db')).toThrow(/has not finished loading/);
+    SQLite.configureWeb({ wasmURL: '/sqlite/wa-sqlite-fts.wasm' });
+    const first = MockWorker.instances[0]!;
+    expect(first.postMessage.mock.calls.map((call) => call[0].type)).toContain('shutdown');
+    first.ackShutdown();
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(2);
+    expect(MockWorker.instances[1]!.postMessage.mock.calls[0][0]).toEqual({
+      type: 'configure',
+      data: { wasmURL: '/sqlite/wa-sqlite-fts.wasm' },
+    });
+  });
+
+  it('should keep the scheduled worker when the module evaluates again', async () => {
+    expect(MockWorker.instances).toHaveLength(0);
+    jest.isolateModules(() => {
+      require('../index');
+    });
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    const opening = SQLite.openDatabaseAsync(':memory:');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(MockWorker.instances).toHaveLength(1);
+    expect(MockWorker.instances[0]!.postMessage.mock.calls.map((call) => call[0].type)).toEqual([
+      'configure',
+      'init',
+      'open',
+    ]);
+    expect(opening).toBeInstanceOf(Promise);
+  });
+
+  it('should not start a second worker when the module evaluates again', async () => {
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    jest.isolateModules(() => {
+      require('../index');
+    });
+    await nextTurnAsync();
+    expect(MockWorker.instances).toHaveLength(1);
+    const opening = SQLite.openDatabaseAsync(':memory:');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(MockWorker.instances).toHaveLength(1);
+    expect(MockWorker.instances[0]!.postMessage.mock.calls.map((call) => call[0].type)).toContain(
+      'open'
+    );
+    expect(opening).toBeInstanceOf(Promise);
+  });
+
   it('should wait to open until the old worker shuts down', async () => {
     await nextTurnAsync();
     const first = MockWorker.instances[0]!;
