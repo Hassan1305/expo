@@ -18,7 +18,7 @@ const SYNC_OPERATION_TIMEOUT_MS = 15_000;
 /** Reading the clock on every busy-loop turn is several times slower. */
 const SYNC_CLOCK_CHECK_SPINS = 4096;
 const SYNC_WORKER_NOT_READY_MESSAGE =
-  'The SQLite web worker has not finished loading. A synchronous call blocks the main thread, so the worker cannot finish loading during this call. Await openDatabaseAsync() once before using the synchronous API.';
+  'The SQLite web worker has not finished loading. A synchronous call blocks the main thread, so the worker cannot finish loading during this call. Call it again on a later turn.';
 
 let hasWarnedSync = false;
 let workerReady = false;
